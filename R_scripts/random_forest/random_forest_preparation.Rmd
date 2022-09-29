@@ -1,0 +1,104 @@
+---
+title: "random forest preparation"
+author: "Marcell Püski"
+date: '2022 szeptember 29 '
+output: html_document
+---
+
+
+# libraries
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(car)
+library(survival)
+library(lfe)
+library(miceadds)
+library(rpart)
+
+```
+
+# import combined_dt - data set
+
+This data set was created in the sub_group_preparation.Rmd script
+
+```{r}
+combined_dt <- data.table(read.csv("../../data/combined_dt.csv"))
+
+```
+
+
+# keep only important variables
+
+```{r}
+dt <- combined_dt %>%
+  select(participant_id, week, visits, age, gender, exp_condition, treatment_number, avg_four_week_visits)
+
+```
+
+
+# keep only 4 week intervention period
+
+```{r}
+dt <- dt %>%
+  filter(week > 0 & week <= 4)
+
+```
+
+
+# rename variables
+
+```{r}
+dt <- dt %>%
+  rename(
+    before_avg = avg_four_week_visits
+  )
+
+```
+
+
+# new sum of gym visits variable
+
+```{r}
+
+dt <- dt %>%
+  group_by(participant_id) %>%
+  mutate(
+    sm_week = sum(visits)
+  )
+
+```
+
+# gym visits - 4weeks avarage 
+```{r}
+dt <- dt %>%
+  mutate(
+    intervention_effect = (sm_week/4) - before_avg
+  )
+
+```
+
+
+# other data (without weeks)
+
+```{r}
+dt_simple <- dt %>%
+  select(participant_id, age, gender, exp_condition, treatment_number, before_avg, sm_week, intervention_effect)
+
+# remove duplicate
+
+dt_simple <- dt_simple[!duplicated(dt_simple$participant_id), ]
+
+
+```
+
+
+# export dt_simple
+
+```{r}
+write_excel_csv(dt_simple, path = ("../../data/dt_simple.csv"), na = "NA", append = FALSE,
+  col_names = TRUE, delim = ",", quote_escape = "double")
+
+```
+

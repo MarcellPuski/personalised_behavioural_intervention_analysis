@@ -1,0 +1,202 @@
+---
+title: "bootstrapping_analysis"
+author: "Marcell Püski"
+date: '2022 szeptember 29 '
+output: html_document
+---
+
+
+# import data sets 
+
+These data tables were created by the bootstapping.Rmd script
+
+
+```{r}
+
+data_files <- list.files("../../data/bootstrapping")
+data_list <- c()
+
+
+for(i in 1:length(data_files)) {                              
+  
+  data_list[[i]] <-  assign(paste0("data_", i),                                   
+         data.table(read.csv(paste0("../../data/bootstrapping/",
+                   data_files[i]))))
+}
+
+```
+
+
+# renaming variables
+
+fix a data loading error in the variable names  
+
+```{r}
+
+for (i in 1:length(data_list)) {
+  
+  data_list[[i]] <- data_list[[i]] %>%
+    rename(
+    condition = 'ď.żfactor'
+  )
+}
+
+```
+
+
+
+# Best interventions
+
+Here, I created a list of the serial numbers of the interventions with the highest scores in each sample.
+
+```{r}
+best_interventions <- c()
+
+for (i in 1:length(data_list)) {
+  
+  best_interventions[i] <- data_list[[i]][1,2]
+  
+}
+
+best_interventions <- unlist(best_interventions)
+
+```
+
+
+# best_interventions plot
+
+```{r}
+best_interventions_table <- data.table(table = c(1:length(best_interventions)), best_interventions = as.factor(best_interventions))
+
+best_interventions_table <- best_interventions_table %>%
+  group_by(best_interventions) %>%
+  mutate(count_name_occurr = n())
+
+
+ggplot(best_interventions_table, aes(x = reorder(best_interventions,-count_name_occurr), fill = factor(ifelse(best_interventions == 5, "first in the original study", "rest"))))+
+  geom_bar(stat = "count")+
+  scale_fill_manual(name = "", values = c("red", "grey50"), labels = c("most effective intervention in original study", "rest of the interventions")) +
+  labs(title = "Most effective interventions\nper sample in bootstrapping analysis",
+       x = "intervention serial number",
+       y = "on how many samples they were most effective")+
+  theme_ds4psy()
+
+
+# How many times was the most effective intervention in the original study also the most effective in the bootstrapping analysis 
+best_interventions_table %>%
+  filter(best_interventions == 5) %>%
+  count()
+
+```
+
+
+# create one dataset
+
+```{r}
+
+# provide numbering
+
+for (i in 1:length(data_list)) {
+  
+  data_list[[i]] <- data_list[[i]] %>%
+    mutate(dt_table = i)
+}
+
+# join them
+
+all_results <- data_list[[1]]
+
+for (i in 2:length(data_list)) {
+  
+  all_results <- full_join(all_results, data_list[[i]])
+}
+
+
+```
+
+
+
+# create b values table
+
+```{r}
+
+b_values <- all_results %>%
+  group_by(condition) %>%
+  summarise(
+    mean_b = mean(coef),
+    standard_deviation = sd(coef),
+    min = min(coef),
+    max = max(coef)
+  )
+
+b_values <- b_values %>%
+  arrange(desc(mean_b))
+
+```
+
+
+
+# distribution of the b value of intervention number five
+
+```{r}
+all_results %>%
+  filter(treatment_number == 5) %>%
+  ggplot(., aes(x = coef))+
+  geom_histogram(binwidth = 0.1) +
+  geom_vline(xintercept = 0.403, lwd = 1, colour = "red", linetype= "dotted")+
+  geom_text(aes(x=0.403, label="\n         value measured in otiginal study", y=5), angle=90, text=element_text(size=11))+
+  labs(title = "Distribution of the b value of the most \neffective intervention (number 5) in the bootstrapping analysis",
+       x = "b value",
+       y = "distribution")+
+  theme_ds4psy()
+
+
+```
+
+
+# Combined best value in original study minus bootstrapping best results
+
+```{r}
+intervention_extra <- all_results %>%
+  group_by(dt_table) %>%
+  mutate(
+    best_intervention_b = max(coef)
+  ) %>%
+  filter(treatment_number == 5)
+
+b_kulonbseg <-  intervention_extra$best_intervention_b - intervention_extra$coef
+
+
+sum(b_kulonbseg)
+
+mean(b_kulonbseg)
+
+```
+
+# b values standard deviation averages
+
+```{r}
+mean(b_values$standard_deviation)
+
+max(b_values$standard_deviation)
+
+```
+
+# b values tables
+
+```{r}
+
+b_ertekek <- b_values
+b_ertekek$sorrend <- c(1:54)
+b_ertekek <- b_ertekek %>%
+  select(sorrend, condition, mean_b, standard_deviation, min, max)
+
+b_ertekek$mean_b <- round(b_ertekek$mean_b, digits = 3)
+b_ertekek$standard_deviation <- round(b_ertekek$standard_deviation, digits = 3)
+b_ertekek$min <- round(b_ertekek$min, digits = 2)
+b_ertekek$max <- round(b_ertekek$max, digits = 2)
+
+kable(b_ertekek, col.names = c("sorrend", "Intervenció", "b érték átlaga", "b érték szórása", "minimum b érték", "maximum b érték"))
+
+```
+

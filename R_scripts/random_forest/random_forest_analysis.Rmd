@@ -1,0 +1,223 @@
+---
+title: "Random forest analysis"
+author: "Marcell Püski"
+date: '2022 szeptember 29 '
+output: html_document
+---
+
+# libraries
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(caTools)
+library(randomForest)
+library(caret)
+library(Metrics)
+library(e1071)
+library(ds4psy)
+
+```
+
+
+# load data
+
+This data was created in the andom_forest_preparation.Rmd script
+
+```{r}
+
+df_simple <- data.table(read.csv("../../data/dt_simple.csv"))
+
+```
+
+
+# rename
+
+```{r}
+df_simple <- df_simple %>%
+  rename(
+    participant_id = 'ď.żparticipant_id'
+  )
+
+
+```
+
+
+# using only relevant interventions
+
+
+```{r}
+df_best <- df_simple %>%
+  filter(treatment_number == 5 | treatment_number == 21 | treatment_number == 40 | treatment_number == 53 | treatment_number == 2 | treatment_number == 3| treatment_number == 28 | treatment_number == 15 | treatment_number == 20 | treatment_number == 34 | treatment_number == 50 | treatment_number == 17 | treatment_number == 31)
+
+df_best$treatment_number = as.factor(df_best$treatment_number)
+df_best$exp_condition = as.factor(df_best$exp_condition)
+
+
+```
+
+
+
+# train set - test set
+```{r}
+set.seed(123)
+split <- sample.split(df_best$participant_id, SplitRatio = 0.7)
+
+train_df <- subset(df_best, split == "TRUE")
+test_df <- subset(df_best, split == "FALSE")
+
+```
+
+
+# random forest
+```{r}
+set.seed(222)
+rf_fit <- randomForest(intervention_effect ~ age+gender+treatment_number+before_avg, data = train_df, ntree = 500,
+                       keep.forest=TRUE, importance=TRUE)
+
+
+rf_fit
+
+```
+
+
+
+# performance on test set
+
+```{r}
+test_df$pred <- predict(rf_fit, newdata = test_df)
+
+sqrt(sum((test_df$pred - test_df$intervention_effect)^2) / nrow(test_df))
+
+```
+
+
+
+# define best interventions/person 
+
+## create data
+```{r}
+dt_predict <- df_best %>%
+  select(participant_id, age, gender, before_avg, treatment_number)
+
+```
+
+
+# test
+```{r}
+
+alma <- dt_predict
+alma$treatment_number <- as.factor(40)
+
+
+alma$five_predict <- predict(rf_fit, alma)
+
+
+```
+
+# for loopos solution
+
+```{r}
+intervention_list <- c(5, 21, 40, 53, 2, 3, 28, 15, 20, 34, 50, 17, 31)
+
+v <- list()
+
+for (i in 1:length(intervention_list)) {
+  
+  a <- intervention_list[i]
+  dt_predict$treatment_number <- as.factor(a)
+  v[[i]] <- predict(rf_fit, dt_predict)
+}
+
+```
+
+
+# put it in to one data table
+```{r}
+prediktalt_values <- data.table(
+  ID =  dt_predict$participant_id,
+  "5" =  v[[1]],
+  "21" = v[[2]],
+  "40" = v[[3]],
+  "53" = v[[4]],
+  "2" = v[[5]],
+  "3" = v[[6]],
+  "28" = v[[7]],
+  "15" = v[[8]],
+  "20" = v[[9]],
+  "34" = v[[10]],
+  "50" = v[[11]],
+  "17" = v[[12]],
+  "31" = v[[13]]
+)
+
+
+```
+
+# long format
+
+```{r}
+prediktalt_values_long <- gather(data = prediktalt_values,
+                            key = intervention,
+                            value = prediction,
+                            "5":"31")
+
+```
+
+
+# choosing best intervention
+
+```{r}
+prediktalt_values_long <- prediktalt_values_long %>%
+  group_by(ID) %>%
+  mutate(
+    best_effect = max(prediction),
+    best_intervention = case_when(best_effect == prediction ~ 1,
+                                  best_effect != prediction ~ 0)
+  )
+
+best_intervention <- prediktalt_values_long %>%
+  filter(best_intervention == 1)
+
+```
+
+
+# which interventioncio is best how many times
+```{r}
+best_intervention %>%
+  group_by(intervention) %>%
+  count()
+
+```
+
+
+# effect of intervention number 5
+
+```{r}
+intervention_5 <- prediktalt_values_long %>%
+  filter(intervention == "5")
+
+```
+
+
+# best intervention minus intervention number 5
+
+```{r}
+# average intervention number 5 effect 
+mean(intervention_5$prediction)
+sd(intervention_5$prediction)
+
+# average best intervention effect
+mean(best_intervention$prediction)
+sd(best_intervention$prediction)
+
+# difference of the two
+mean(best_intervention$prediction) - mean(intervention_5$prediction)
+
+
+# What is the average percentage improvement in using the personally best intervention (predicted by the random forest model) compared to using only intervention number 5: 
+(mean(best_intervention$prediction) - mean(intervention_5$prediction))/mean(intervention_5$prediction)*100
+
+
+```
+

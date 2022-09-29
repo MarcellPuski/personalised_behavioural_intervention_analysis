@@ -1,0 +1,134 @@
+---
+title: "sub group analyis"
+author: "Marcell Püski"
+date: '2022 szeptember 29 '
+output: html_document
+---
+
+# libraries
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(unikn)
+library(ds4psy)
+library(stringr)
+library(knitr)
+
+```
+
+
+# import data
+
+these data tables were created in the sub_group_preparation script
+
+```{r}
+result_full <- data.table(read.csv("../../data/sub_group_data/result_full.csv"))
+result_daily <- data.table(read.csv("../../data/sub_group_data/results_daily.csv"))
+result_female <- data.table(read.csv("../../data/sub_group_data/results_female.csv"))
+result_few <- data.table(read.csv("../../data/sub_group_data/results_few.csv"))
+result_male <- data.table(read.csv("../../data/sub_group_data/results_male.csv"))
+result_middle_aged <- data.table(read.csv("../../data/sub_group_data/results_middle_aged.csv"))
+result_often <- data.table(read.csv("../../data/sub_group_data/results_often.csv"))
+result_old <- data.table(read.csv("../../data/sub_group_data/results_old.csv"))
+result_young <- data.table(read.csv("../../data/sub_group_data/results_young.csv"))
+result_zero <- data.table(read.csv("../../data/sub_group_data/results_zero.csv"))
+
+```
+
+
+# function
+
+```{r}
+
+manipulation <- function(dt) {
+  
+  dt <- dt %>%
+    rename(
+      condition = 'ď.żfactor'
+    ) %>%
+    arrange(desc(coef_main))
+}
+
+result_list <- c(result_daily, result_female, result_few, result_full, result_male, result_middle_aged, result_often, result_old, result_young, result_zero)
+
+
+result_full <- manipulation(result_full)
+result_daily <- manipulation(result_daily)
+result_female <- manipulation(result_female)
+result_few <- manipulation(result_few)
+result_male <- manipulation(result_male)
+result_middle_aged <- manipulation(result_middle_aged)
+result_often <- manipulation(result_often)
+result_old <- manipulation(result_old)
+result_young <- manipulation(result_young)
+result_zero <- manipulation(result_zero)
+
+
+
+```
+
+
+# plot function
+
+```{r}
+
+plot_result <- function(dt, plot_title) {
+
+ggplot(dt[0:5,], aes(x = reorder(condition,-coef_main), y = coef_main)) +
+  geom_bar(stat = "identity", fill = unikn::pal_seeblau[[2]]) +
+  coord_flip() +
+  geom_pointrange(aes(x = condition, y = coef_main, ymin = coef_main - sd, ymax = coef_main + sd), color = unikn::Bordeaux)+
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 20))+
+  labs(title = plot_title,
+       x = "intervenciók",
+       y = "b értékek")+
+  theme_ds4psy()
+  
+}
+
+```
+
+
+# gender plots
+```{r}
+plot_result(result_male, "Top 5 most effective interventions \nfor men")
+
+plot_result(result_female, "Top 5 most effective interventions \nfor women")
+
+```
+
+
+# age plots
+
+```{r}
+plot_result(result_young, "Top 5 most effective interventions \nfor people under 25")
+
+plot_result(result_middle_aged, "Top 5 most effective interventions \nfor people aged 25 to 50")
+
+plot_result(result_old, "Top 5 most effective interventions \nfor people over 50")
+
+```
+
+
+# previus gym visits plots
+
+```{r}
+
+plot_result(result_zero, "5 most effective interventions for \npeople who did not exercise before \nstarting the intervention")
+
+plot_result(result_few, "5 most effective interventions for \npeople who exercised on average 1-3 times per week \nbefore starting the intervention")
+
+plot_result(result_often, "5 most effective interventions for \npeople who exercised on average \nmore than 3 times a week before starting the intervention")
+
+```
+
+
+# full table
+
+```{r}
+kable(result_full, col.names = c("intervenció", "intervenci száma", "b-érték", "SE", "p-érték"))
+
+```
+
+

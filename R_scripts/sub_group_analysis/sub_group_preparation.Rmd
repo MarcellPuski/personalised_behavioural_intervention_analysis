@@ -1,0 +1,716 @@
+---
+title: "Sub group preparation"
+author: "Marcell Püski"
+date: '2022 szeptember 29 '
+output: html_document
+---
+
+
+# libraries
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(car)
+library(survival)
+library(lfe)
+library(miceadds)
+
+```
+
+
+# load data
+
+```{r}
+metadata = data.table(read.csv("../../data/pptdata.csv"))
+
+metadata[,intervention:=as.numeric(week %in% c(1:4))]
+
+```
+
+
+# data during intervention
+
+```{r}
+##-----Data during intervention-----:
+metadata_during = metadata[week<=4 & week >= -52]
+##Create weights:
+#~~~T_i: length of panel of respective individual
+#~~~Lc : length of respective cohort
+#~~~Ngc: number of participants in respective group and cohort
+metadata_during[,T_i:=.N, by = participant_id]
+metadata_during[,time_weight:=as.numeric(Lc)/(T_i * Ngc)]
+metadata_during = metadata_during[order(participant_id)]
+metadata_during[,ind_weight:=1/T_i]
+##Relevel factors so the Placebe Control is the reference group
+metadata_during[,exp_condition:=as.factor(exp_condition)]
+metadata_during[,exp_condition:=relevel(exp_condition, ref = "Placebo Control")]
+metadata_during[,treatment_number:=as.numeric(exp_condition)]
+
+```
+
+
+# before intervention
+
+```{r}
+balance_pid_df <- readRDS("../../data/balance_pid_df.RDS") %>% 
+  mutate(final_name = desc)
+
+library(broom)
+
+balance_pid_df$desc <- relevel(balance_pid_df$desc, ref = "Placebo Control")
+balance_pid_df$cohort <- relevel(balance_pid_df$cohort, ref = "1234")
+
+```
+
+
+```{r}
+weighted_gym_visits_final <- readRDS("../../data/weighted_gym_visits_final.RDS")
+
+```
+
+
+```{r}
+pre_weeks_df <- weighted_gym_visits_final %>% 
+  distinct(participant_id) %>% 
+  mutate(weeks_count = 4) %>% 
+  uncount(weeks_count, .id = "relative_weeks") %>% 
+  mutate(relative_weeks = relative_weeks * -1) %>% 
+  left_join(dplyr::select(weighted_gym_visits_final, participant_id, relative_weeks, week_visits), 
+            by = c("participant_id", "relative_weeks")) %>% 
+  mutate(week_visits = ifelse(is.na(week_visits), 0, week_visits)) %>% 
+  group_by(participant_id) %>% 
+  summarise(avg_four_week_visits = mean(week_visits)) %>% 
+  left_join(distinct(balance_pid_df, participant_id, final_name), by = "participant_id")
+
+
+avg_4_weeks_visit_df <- pre_weeks_df %>%
+  select(participant_id, avg_four_week_visits)
+
+```
+
+# combine the two data set
+
+```{r}
+combined_dt <- metadata_during
+
+combined_dt <- left_join(combined_dt, avg_4_weeks_visit_df)
+
+```
+
+
+
+# combined data function
+
+```{r}
+meta_regression_combined = function(period, weight, dv, robust = "none", ref = 'control'){
+  ## period: either during, 4-week post-intervention or 10-week post-intervention
+  ## weight: time-weighted (main one) or individual-weighted (robustness check #3)
+  ## dv    : binary (whether visited the gym during a given week) or visits (weekly gym visits)
+  ## robust: specify what robustness check to run (default to 'none' for main analysis)
+  ## ref   : the reference treatment group, either "control" for Placebo Control or "mintreat" for Planning, Reminders and Micro-Incentives
+  if(period == "during"){data = copy(combined_dt)} 
+  if(period == "4post"){data = copy(metadata_4post)}
+  if(period == "10post"){data = copy(metadata_10post)}
+  if(dv == "visits"){data[,dv:=visits]}; if(dv == "binary"){data[,dv:=any_visit]} # specify dv
+  if(robust == "intended"){ 
+    ## Robustness check #1: Using intended treatment instead of assigned treatment
+    data[,intended_exp_condition:=as.character(intended_exp_condition)]
+    data[,intended_exp_condition:=relevel(as.factor(intended_exp_condition), ref = "Placebo Control")]
+    data[,exp_condition:=intended_exp_condition]
+    data[,treatment_number:=as.numeric(intended_exp_condition)]
+    data[,Ngc_intended:=uniqueN(participant_id), list(exp_condition, cohort)]
+    data[,time_weight:=as.numeric(Lc)/(Ngc_intended*T_i)]
+  }
+  if(robust == "collapse"){ 
+    ## Robustness check #2: Without collapsing different versions of Planning, Reminders & Micro-incentives
+    data[treatment == "1241C", exp_condition:="Planning, Reminders & Micro-Incentives to Exercise II"]
+    data[treatment == "1253A", exp_condition:="Planning, Reminders & Micro-Incentives to Exercise III"]
+    data[,treatment_number:=as.numeric(as.factor(exp_condition))]
+    data[,Ngc_collapse:=uniqueN(participant_id), list(exp_condition, cohort)]
+    data[,time_weight:=as.numeric(Lc)/(Ngc_collapse * T_i)]
+  }
+  if(weight == "time"){W = data$time_weight};  ## The main weighting scheme used throughout
+  if(weight == "ind"){
+    ## Robustness check #3: Obs weighted by individuals
+    W = data$ind_weight
+  }  
+  if(period %in% c("4post", "10post") ){
+    ## Post-intervention period data
+    main_reg = felm(dv~factor(treatment_number)*intervention +
+                      factor(treatment_number)*post_intervention|
+                      factor(week):factor(cohort) + factor(participant_id)|0|
+                      participant_id, data = data, weights = W,
+                    exactDOF = TRUE)
+    coeff     = coef(main_reg)
+    main_coef = coeff[!is.nan(coeff)]
+    
+    coef_table = data.table(name = names(main_coef), est = main_coef)
+    coef_table[,treatment_number:=gsub("factor(treatment_number)", "", name, fixed = TRUE)]
+    coef_table[,treatment_number:=gsub(":post_intervention", "", treatment_number, fixed = TRUE)]
+    coef_table[,treatment_number:=as.numeric(treatment_number)]
+  }
+  if(period == "during"){
+    ## During intervention data
+    main_reg = felm(dv~factor(treatment_number)*intervention|factor(week):factor(cohort) + factor(participant_id)|0|
+                      participant_id, data = data, weights = W,
+                    exactDOF = TRUE)
+    coeff     = coef(main_reg)
+    main_coef = coeff[!is.nan(coeff)]
+    
+    coef_table = data.table(name = names(main_coef), est = main_coef)
+    coef_table[,treatment_number:=gsub("factor(treatment_number)", "", name, fixed = TRUE)]
+    coef_table[,treatment_number:=gsub(":intervention", "", treatment_number, fixed = TRUE)]
+    coef_table[,treatment_number:=as.numeric(treatment_number)]
+  }
+  ## Get clustered standard errors:
+  HCmatrix = main_reg$clustervcv
+  HCmatrix = HCmatrix[!is.na(coef(main_reg)),!is.na(coef(main_reg))]
+    
+  #----Wald tests---:
+  ## This is to get pairwise Wald tests of coefficients to compare the experimental conditions
+  H = rep(0, nrow(coef_table))
+  G = length(unique(coef_table[!is.na(treatment_number)]$treatment_number))+1
+  est_compare  = matrix(0, G, G)
+  sd_compare   = matrix(0, G, G)
+  pval_compare = matrix(0, G, G)
+  ## some formatting below:
+  for(t1 in 2:G){
+    for(t2 in (1:(G-1))){
+      H = rep(0, nrow(coef_table))
+      H[coef_table[treatment_number==t1, which = TRUE]] = 1
+      H[coef_table[treatment_number==t2, which = TRUE]] = -1
+      est_compare[t1,t2]  = H %*% coef_table$est
+      sd_compare[t1,t2]   = sqrt(c(HCmatrix %*% H) %*% H)
+      pval_compare[t1,t2] =  linearHypothesis(main_reg, hypothesis.matrix = H, test = 'Chisq', vcov. = HCmatrix,
+                                                singular.ok = TRUE)$`Pr(>Chisq)`[2]
+    }
+  }
+  correct_est = function(X){
+      X[,G]   = -X[G,]
+      X[1,]   = -X[,1]
+      diag(X) = 0
+      return(X)
+  }
+  correct_err = function(X){
+      X[,G]   = X[G,]
+      X[1,]   = X[,1]
+      diag(X) = 0
+      return(X)
+  }
+    
+  est_compare  = correct_est(est_compare)
+  sd_compare   = correct_err(sd_compare)
+  pval_compare = correct_err(pval_compare)
+  #-----Create table of coefficients-----:
+  treatment_code = data[,.(treatment_number = treatment_number[1]), 
+                        factor(exp_condition)]
+  treatment_code = treatment_code[order(treatment_number)]
+  if(ref == "control"){ # If the reference group is "Placebo Control"
+    treatment_code[,coef:=round(est_compare[,1], 3)]
+    treatment_code[,sd:=round(sd_compare[,1], 3)]
+    treatment_code[,pval:=round(pval_compare[,1], 3)]  
+  }
+    
+    
+  if(ref == 'mintreat'){# If the reference group is "Planning, Reminders, and Micro-Incentives"
+    treatment_code[,coef:=round(est_compare[,44], 3)] 
+    treatment_code[,sd:=round(sd_compare[,44], 3)]
+    treatment_code[,pval:=round(pval_compare[,44], 3)]
+    
+  }
+  ## %outperformed significantly:
+  est_better   = est_compare  > 0
+  pval_better5 = pval_compare < 0.05
+  better5 = est_better * pval_better5
+    
+  ## Rsquared:
+  a  = summary(main_reg)
+  r2 = c(a$r.squared, a$adj.r.squared)
+  return(list("model" = main_reg, 
+                "r2"    = r2,
+                "coef"  = treatment_code,
+                "outperform" = better5,
+                "pval_pairs" = pval_compare)) 
+}
+
+
+```
+
+
+
+# analyses
+
+
+## combined data
+```{r}
+main_2 = meta_regression_combined("during", "time", "visits") ## Main regression results
+View(main_2$coef)                                    
+setnames(main_2$coef, 'coef', 'coef_main')
+
+```
+
+
+
+## investigate variables
+
+```{r}
+#age
+ggplot(combined_dt, aes(age)) +
+  geom_histogram()
+
+#before intervention gym
+ggplot(combined_dt, aes(avg_four_week_visits)) +
+  geom_histogram()
+
+
+combined_dt %>%
+  group_by(avg_four_week_visits) %>%
+  count()
+
+ggplot(combined_dt, aes(gender)) +
+  geom_bar()
+
+```
+
+
+
+# Sub group analyses
+
+
+## Create more flexible funkcion
+
+```{r}
+meta_regression_free = function(dt, period, weight, dv, robust = "none", ref = 'control'){
+  ## period: either during, 4-week post-intervention or 10-week post-intervention
+  ## weight: time-weighted (main one) or individual-weighted (robustness check #3)
+  ## dv    : binary (whether visited the gym during a given week) or visits (weekly gym visits)
+  ## robust: specify what robustness check to run (default to 'none' for main analysis)
+  ## ref   : the reference treatment group, either "control" for Placebo Control or "mintreat" for Planning, Reminders and Micro-Incentives
+  if(period == "during"){data = copy(dt)} 
+  if(period == "4post"){data = copy(metadata_4post)}
+  if(period == "10post"){data = copy(metadata_10post)}
+  if(dv == "visits"){data[,dv:=visits]}; if(dv == "binary"){data[,dv:=any_visit]} # specify dv
+  if(robust == "intended"){ 
+    ## Robustness check #1: Using intended treatment instead of assigned treatment
+    data[,intended_exp_condition:=as.character(intended_exp_condition)]
+    data[,intended_exp_condition:=relevel(as.factor(intended_exp_condition), ref = "Placebo Control")]
+    data[,exp_condition:=intended_exp_condition]
+    data[,treatment_number:=as.numeric(intended_exp_condition)]
+    data[,Ngc_intended:=uniqueN(participant_id), list(exp_condition, cohort)]
+    data[,time_weight:=as.numeric(Lc)/(Ngc_intended*T_i)]
+  }
+  if(robust == "collapse"){ 
+    ## Robustness check #2: Without collapsing different versions of Planning, Reminders & Micro-incentives
+    data[treatment == "1241C", exp_condition:="Planning, Reminders & Micro-Incentives to Exercise II"]
+    data[treatment == "1253A", exp_condition:="Planning, Reminders & Micro-Incentives to Exercise III"]
+    data[,treatment_number:=as.numeric(as.factor(exp_condition))]
+    data[,Ngc_collapse:=uniqueN(participant_id), list(exp_condition, cohort)]
+    data[,time_weight:=as.numeric(Lc)/(Ngc_collapse * T_i)]
+  }
+  if(weight == "time"){W = data$time_weight};  ## The main weighting scheme used throughout
+  if(weight == "ind"){
+    ## Robustness check #3: Obs weighted by individuals
+    W = data$ind_weight
+  }  
+  if(period %in% c("4post", "10post") ){
+    ## Post-intervention period data
+    main_reg = felm(dv~factor(treatment_number)*intervention +
+                      factor(treatment_number)*post_intervention|
+                      factor(week):factor(cohort) + factor(participant_id)|0|
+                      participant_id, data = data, weights = W,
+                    exactDOF = TRUE)
+    coeff     = coef(main_reg)
+    main_coef = coeff[!is.nan(coeff)]
+    
+    coef_table = data.table(name = names(main_coef), est = main_coef)
+    coef_table[,treatment_number:=gsub("factor(treatment_number)", "", name, fixed = TRUE)]
+    coef_table[,treatment_number:=gsub(":post_intervention", "", treatment_number, fixed = TRUE)]
+    coef_table[,treatment_number:=as.numeric(treatment_number)]
+  }
+  if(period == "during"){
+    ## During intervention data
+    main_reg = felm(dv~factor(treatment_number)*intervention|factor(week):factor(cohort) + factor(participant_id)|0|
+                      participant_id, data = data, weights = W,
+                    exactDOF = TRUE)
+    coeff     = coef(main_reg)
+    main_coef = coeff[!is.nan(coeff)]
+    
+    coef_table = data.table(name = names(main_coef), est = main_coef)
+    coef_table[,treatment_number:=gsub("factor(treatment_number)", "", name, fixed = TRUE)]
+    coef_table[,treatment_number:=gsub(":intervention", "", treatment_number, fixed = TRUE)]
+    coef_table[,treatment_number:=as.numeric(treatment_number)]
+  }
+  ## Get clustered standard errors:
+  HCmatrix = main_reg$clustervcv
+  HCmatrix = HCmatrix[!is.na(coef(main_reg)),!is.na(coef(main_reg))]
+    
+  #----Wald tests---:
+  ## This is to get pairwise Wald tests of coefficients to compare the experimental conditions
+  H = rep(0, nrow(coef_table))
+  G = length(unique(coef_table[!is.na(treatment_number)]$treatment_number))+1
+  est_compare  = matrix(0, G, G)
+  sd_compare   = matrix(0, G, G)
+  pval_compare = matrix(0, G, G)
+  ## some formatting below:
+  for(t1 in 2:G){
+    for(t2 in (1:(G-1))){
+      H = rep(0, nrow(coef_table))
+      H[coef_table[treatment_number==t1, which = TRUE]] = 1
+      H[coef_table[treatment_number==t2, which = TRUE]] = -1
+      est_compare[t1,t2]  = H %*% coef_table$est
+      sd_compare[t1,t2]   = sqrt(c(HCmatrix %*% H) %*% H)
+      pval_compare[t1,t2] =  linearHypothesis(main_reg, hypothesis.matrix = H, test = 'Chisq', vcov. = HCmatrix,
+                                                singular.ok = TRUE)$`Pr(>Chisq)`[2]
+    }
+  }
+  correct_est = function(X){
+      X[,G]   = -X[G,]
+      X[1,]   = -X[,1]
+      diag(X) = 0
+      return(X)
+  }
+  correct_err = function(X){
+      X[,G]   = X[G,]
+      X[1,]   = X[,1]
+      diag(X) = 0
+      return(X)
+  }
+    
+  est_compare  = correct_est(est_compare)
+  sd_compare   = correct_err(sd_compare)
+  pval_compare = correct_err(pval_compare)
+  #-----Create table of coefficients-----:
+  treatment_code = data[,.(treatment_number = treatment_number[1]), 
+                        factor(exp_condition)]
+  treatment_code = treatment_code[order(treatment_number)]
+  if(ref == "control"){ # If the reference group is "Placebo Control"
+    treatment_code[,coef:=round(est_compare[,1], 3)]
+    treatment_code[,sd:=round(sd_compare[,1], 3)]
+    treatment_code[,pval:=round(pval_compare[,1], 3)]  
+  }
+    
+    
+  if(ref == 'mintreat'){# If the reference group is "Planning, Reminders, and Micro-Incentives"
+    treatment_code[,coef:=round(est_compare[,44], 3)] 
+    treatment_code[,sd:=round(sd_compare[,44], 3)]
+    treatment_code[,pval:=round(pval_compare[,44], 3)]
+    
+  }
+  ## %outperformed significantly:
+  est_better   = est_compare  > 0
+  pval_better5 = pval_compare < 0.05
+  better5 = est_better * pval_better5
+    
+  ## Rsquared:
+  a  = summary(main_reg)
+  r2 = c(a$r.squared, a$adj.r.squared)
+  return(list("model" = main_reg, 
+                "r2"    = r2,
+                "coef"  = treatment_code,
+                "outperform" = better5,
+                "pval_pairs" = pval_compare)) 
+}
+
+
+
+```
+
+## Gender
+
+### Female
+
+Female data set
+```{r}
+female_dt <- combined_dt %>%
+  filter(gender == "F")
+
+```
+
+Female analyses
+```{r}
+main_female = meta_regression_free(female_dt, "during", "time", "visits") ## Main regression results
+View(main_female$coef)                                    
+setnames(main_female$coef, 'coef', 'coef_main')
+
+results_female <- main_female$coef
+
+```
+
+### Male
+
+male data set
+```{r}
+male_dt <- combined_dt %>%
+  filter(gender == "M")
+
+```
+
+
+male analyses
+```{r}
+main_male = meta_regression_free(male_dt, "during", "time", "visits") ## Main regression results
+View(main_male$coef)                                    
+setnames(main_male$coef, 'coef', 'coef_main')
+
+results_male <- main_male$coef
+
+```
+
+
+## Age
+
+### Young (<=25)
+
+young data set
+```{r}
+young_dt <- combined_dt %>%
+  filter(age <= 25)
+
+```
+
+young analyses
+```{r}
+main_young = meta_regression_free(young_dt, "during", "time", "visits") ## Main regression results
+View(main_young$coef)                                    
+setnames(main_young$coef, 'coef', 'coef_main')
+
+results_young <- main_young$coef
+
+```
+
+### Middle aged ( 25 < age <= 50)
+
+middle_aged data set up
+```{r}
+middle_aged_dt <- combined_dt %>%
+  filter(age > 25 & age <= 50)
+
+```
+
+middle_aged analyses
+```{r}
+main_middle_aged = meta_regression_free(middle_aged_dt, "during", "time", "visits") ## Main regression results
+View(main_middle_aged$coef)                                    
+setnames(main_middle_aged$coef, 'coef', 'coef_main')
+
+results_middle_aged <- main_middle_aged$coef
+
+```
+
+### Old (>50)
+
+```{r}
+old_dt <- combined_dt %>%
+  filter(age > 50)
+
+```
+
+old analyses
+```{r}
+main_old = meta_regression_free(old_dt, "during", "time", "visits") ## Main regression results
+View(main_old$coef)                                    
+setnames(main_old$coef, 'coef', 'coef_main')
+
+results_old <- main_old$coef
+
+```
+
+
+## avarage gym visits before intervention
+
+### not even once (0)
+
+zero data set up
+```{r}
+zero_dt <- combined_dt %>%
+  filter(avg_four_week_visits == 0)
+
+```
+
+zero analyses
+```{r}
+main_zero = meta_regression_free(zero_dt, "during", "time", "visits") ## Main regression results
+View(main_zero$coef)                                    
+setnames(main_zero$coef, 'coef', 'coef_main')
+
+results_zero <- main_zero$coef
+
+```
+
+
+### few times (0 < gym visits <= 3)
+
+few data set up
+```{r}
+few_dt <- combined_dt %>%
+  filter(avg_four_week_visits > 0 & avg_four_week_visits <= 3)
+
+```
+
+few data analyses
+```{r}
+main_few = meta_regression_free(few_dt, "during", "time", "visits") ## Main regression results
+View(main_few$coef)                                    
+setnames(main_few$coef, 'coef', 'coef_main')
+
+results_few <- main_few$coef
+
+```
+
+
+### often (3 < gym )
+
+often data set up
+```{r}
+often_dt <- combined_dt %>%
+  filter(avg_four_week_visits > 3)
+
+```
+
+often data analyses
+```{r}
+main_often = meta_regression_free(often_dt, "during", "time", "visits") ## Main regression results
+View(main_often$coef)                                    
+setnames(main_often$coef, 'coef', 'coef_main')
+
+results_often <- main_often$coef
+
+```
+
+
+### almost daily (>5) --- (not used)
+
+daily data set up
+```{r}
+daily_dt <- combined_dt %>%
+  filter(avg_four_week_visits > 5)
+
+```
+
+
+daily data analyses
+```{r}
+main_daily = meta_regression_free(daily_dt, "during", "time", "visits") ## Main regression results
+View(main_daily$coef)                                    
+setnames(main_daily$coef, 'coef', 'coef_main')
+
+results_daily <- main_daily$coef
+
+```
+
+
+## full - all of the data
+
+```{r}
+main_full = meta_regression_free(combined_dt, "during", "time", "visits") ## Main regression results
+View(main_full$coef)                                    
+setnames(main_full$coef, 'coef', 'coef_main')
+
+results_full <- main_full$coef
+
+```
+
+
+
+# cheking number of participants in each condition
+
+```{r}
+
+often_dt %>%
+  group_by(exp_condition) %>%
+  distinct(participant_id) %>%
+  count()
+
+
+combined_dt %>%
+  group_by(exp_condition) %>%
+  distinct(participant_id) %>%
+  count()
+
+daily_dt %>%
+  group_by(exp_condition) %>%
+  distinct(participant_id) %>%
+  count()
+
+old_dt %>%
+  group_by(exp_condition) %>%
+  distinct(participant_id) %>%
+  count()
+
+middle_aged_dt %>%
+  group_by(exp_condition) %>%
+  distinct(participant_id) %>%
+  count()
+
+young_dt %>%
+  group_by(exp_condition) %>%
+  distinct(participant_id) %>%
+  count()
+
+few_dt %>%
+  group_by(exp_condition) %>%
+  distinct(participant_id) %>%
+  count()
+
+zero_dt %>%
+  group_by(exp_condition) %>%
+  distinct(participant_id) %>%
+  count()
+
+male_dt %>%
+  group_by(exp_condition) %>%
+  distinct(participant_id) %>%
+  count()
+
+female_dt %>%
+  group_by(exp_condition) %>%
+  distinct(participant_id) %>%
+  count()
+
+```
+
+
+# exporting data sets
+
+```{r}
+write_excel_csv(combined_dt, path = ("../../data/combined_dt.csv"), na = "NA", append = FALSE,
+  col_names = TRUE, delim = ",", quote_escape = "double")
+
+```
+
+# export results
+```{r}
+write_excel_csv(results_full, path = ("../../data/sub_group_data/result_full.csv"), na = "NA", append = FALSE,
+  col_names = TRUE, delim = ",", quote_escape = "double")
+
+write_excel_csv(results_daily, path = ("../../data/sub_group_data/results_daily.csv"), na = "NA", append = FALSE,
+  col_names = TRUE, delim = ",", quote_escape = "double")
+
+write_excel_csv(results_female, path = ("../../data/sub_group_data/results_female.csv"), na = "NA", append = FALSE,
+  col_names = TRUE, delim = ",", quote_escape = "double")
+
+write_excel_csv(results_few, path = ("../../data/sub_group_data/results_few.csv"), na = "NA", append = FALSE,
+  col_names = TRUE, delim = ",", quote_escape = "double")
+
+write_excel_csv(results_male, path = ("../../data/sub_group_data/results_male.csv"), na = "NA", append = FALSE,
+  col_names = TRUE, delim = ",", quote_escape = "double")
+
+write_excel_csv(results_middle_aged, path = ("../../data/sub_group_data/results_middle_aged.csv"), na = "NA", append = FALSE,
+  col_names = TRUE, delim = ",", quote_escape = "double")
+
+write_excel_csv(results_often, path = ("../../data/sub_group_data/results_often.csv"), na = "NA", append = FALSE,
+  col_names = TRUE, delim = ",", quote_escape = "double")
+
+write_excel_csv(results_old, path = ("../../data/sub_group_data/results_old.csv"), na = "NA", append = FALSE,
+  col_names = TRUE, delim = ",", quote_escape = "double")
+
+write_excel_csv(results_young, path = ("../../data/sub_group_data/results_young.csv"), na = "NA", append = FALSE,
+  col_names = TRUE, delim = ",", quote_escape = "double")
+
+write_excel_csv(results_zero, path = ("../../data/sub_group_data/results_zero.csv"), na = "NA", append = FALSE,
+  col_names = TRUE, delim = ",", quote_escape = "double")
+
+
+```
+
