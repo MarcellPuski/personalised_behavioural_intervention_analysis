@@ -1,0 +1,55 @@
+﻿factor,treatment_number,coef_main,sd,pval
+Placebo Control,1,0,0,0
+Asked Questions about Workouts,2,0.272,0.112,0.015
+Bonus for Consistent Exercise Schedule,3,0.183,0.088,0.039
+Bonus for Returning after Missed Workouts a,4,0.357,0.081,0
+Bonus for Returning after Missed Workouts b,5,0.453,0.098,0
+Bonus for Variable Exercise Schedule,6,0.135,0.093,0.147
+Choice of Gain- or Loss-Framed Micro-Incentives,7,0.299,0.055,0
+Defaulted into 1 Weekly Workout,8,0.112,0.094,0.23
+Defaulted into 3 Weekly Workouts,9,0.259,0.085,0.002
+Effective Workouts Encouraged,10,0.177,0.069,0.01
+Exercise Advice Solicited,11,0.252,0.084,0.003
+"Exercise Advice Solicited, Shared with Others",12,0.027,0.089,0.764
+Exercise Commitment Contract Encouraged,13,0.083,0.083,0.317
+Exercise Commitment Contract Explained,14,0.309,0.095,0.001
+Exercise Commitment Contract Explained Post-Intervention,15,0.111,0.081,0.169
+Exercise Encouraged,16,0.169,0.088,0.056
+Exercise Encouraged with E-Signed Pledge,17,0.125,0.089,0.16
+Exercise Encouraged with Signed Pledge,18,0.193,0.099,0.052
+Exercise Encouraged with Typed Pledge,19,0.228,0.108,0.034
+Exercise Fun Facts Shared,20,0.244,0.084,0.004
+Exercise Social Norms Shared (High and Increasing),21,0.382,0.083,0
+Exercise Social Norms Shared (High),22,0.007,0.137,0.96
+Exercise Social Norms Shared (Low but Increasing),23,0.088,0.078,0.259
+Exercise Social Norms Shared (Low),24,0.23,0.077,0.003
+Fitness Questionnaire,25,0.243,0.08,0.002
+Fitness Questionnaire with Cognitive Reappraisal Prompt,26,0.171,0.079,0.03
+Fitness Questionnaire with Decision Support,27,0.061,0.08,0.442
+Fitness Questionnaire with Decision Support & Cognitive Reappraisal Prompt,28,0.292,0.081,0
+Following Workout Plan Encouraged,29,0.304,0.083,0
+Free Audiobook Provided,30,0.392,0.123,0.001
+"Free Audiobook Provided, Temptation Bundling Explained",31,0.333,0.077,0
+Fun Workouts Encouraged,32,0.126,0.072,0.079
+Gain-Framed Micro-Incentives,33,0.235,0.09,0.009
+Gym Routine Encouraged,34,0.161,0.086,0.062
+Higher Incentives a,35,0.39,0.092,0
+Higher Incentives b,36,0.203,0.078,0.009
+Loss-Framed Micro-Incentives,37,0.18,0.077,0.019
+"Mon-Fri Consistency Rewarded, Sat-Sun Consistency Rewarded",38,0.156,0.075,0.037
+Planning Benefits Explained,39,0.152,0.096,0.114
+Planning Fallacy Described and Planning Revision Encouraged,40,0.341,0.122,0.005
+Planning Revision Encouraged,41,0.2,0.087,0.021
+Planning Workouts Encouraged,42,0.168,0.071,0.018
+Planning Workouts Rewarded,43,0.155,0.078,0.046
+"Planning, Reminders & Micro-Incentives to Exercise",44,0.173,0.049,0
+Reflecting on Workouts Encouraged,45,0.159,0.084,0.059
+Reflecting on Workouts Rewarded,46,0.145,0.083,0.079
+Rewarded for Responding to Questions about Workouts,47,0.101,0.084,0.228
+Rigidity Rewarded a,48,0.266,0.08,0.001
+Rigidity Rewarded b,49,0.04,0.083,0.627
+Rigidity Rewarded c,50,0.179,0.076,0.018
+Rigidity Rewarded d,51,0.081,0.079,0.3
+Rigidity Rewarded e,52,0.204,0.083,0.014
+Values Affirmation,53,0.279,0.095,0.003
+Values Affirmation Followed by Diagnosis as Gritty,54,0.191,0.082,0.02
