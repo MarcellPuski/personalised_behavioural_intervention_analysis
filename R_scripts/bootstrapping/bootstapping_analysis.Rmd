@@ -6,6 +6,22 @@ output: html_document
 ---
 
 
+# load libraries
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(car)
+library(survival)
+library(lfe)
+library(miceadds)
+library(boot)
+library(ds4psy)
+library(knitr)
+
+```
+
+
 # import data sets 
 
 These data tables were created by the bootstapping.Rmd script
